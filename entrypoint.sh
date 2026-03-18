@@ -1,14 +1,10 @@
 #!/bin/bash
 set -e
 
-VENV_PATH="/app/venv"
-export PATH="$VENV_PATH/bin:$PATH"
-export CC=clang-18
-export CXX=clang++-18
+export PATH="/app/venv/bin:$PATH"
 
 MODEL_DIR="${MODEL_DIR:-/app/models/BitNet-b1.58-2B-4T}"
 MODEL_FILE="${MODEL_FILE:-$MODEL_DIR/ggml-model-i2_s.gguf}"
-QUANT_TYPE="${QUANT_TYPE:-i2_s}"
 HF_REPO="${HF_REPO:-microsoft/BitNet-b1.58-2B-4T-gguf}"
 THREADS="${THREADS:-4}"
 HOST="${HOST:-0.0.0.0}"
@@ -16,36 +12,32 @@ PORT="${PORT:-8080}"
 
 MODE="${1:-server}"
 
-log() { echo -e "\033[1;36m[BitNet]\033[0m $*"; }
+log()   { echo -e "\033[1;36m[BitNet]\033[0m $*"; }
 error() { echo -e "\033[1;31m[BitNet ERROR]\033[0m $*" >&2; exit 1; }
 
 # ---------------------------------------------------
 download_model() {
     log "Baixando modelo: $HF_REPO -> $MODEL_DIR"
+    mkdir -p "$MODEL_DIR"
+    hf download "$HF_REPO" --local-dir "$MODEL_DIR" 2>/dev/null || \
     huggingface-cli download "$HF_REPO" --local-dir "$MODEL_DIR"
     log "Download concluído!"
 }
 
 # ---------------------------------------------------
-build_project() {
-    if [ ! -f "$MODEL_DIR/ggml-model-${QUANT_TYPE}.gguf" ]; then
-        log "Modelo não encontrado. Executando download primeiro..."
+ensure_model() {
+    if [ ! -f "$MODEL_FILE" ]; then
+        log "Modelo não encontrado em $MODEL_FILE"
         download_model
+    else
+        log "Modelo encontrado: $MODEL_FILE"
     fi
-
-    log "Compilando BitNet (quant: $QUANT_TYPE)..."
-    cd /app
-    python setup_env.py -md "$MODEL_DIR" -q "$QUANT_TYPE"
-    log "Build concluído!"
 }
 
 # ---------------------------------------------------
-ensure_built() {
-    if [ ! -f "$MODEL_FILE" ]; then
-        log "Modelo não encontrado em $MODEL_FILE"
-        build_project
-    else
-        log "Modelo encontrado: $MODEL_FILE"
+ensure_binary() {
+    if [ ! -f "/app/build/bin/llama-server" ]; then
+        error "Binário não encontrado em /app/build/bin/llama-server. O build do Dockerfile falhou."
     fi
 }
 
@@ -55,15 +47,11 @@ case "$MODE" in
         download_model
         ;;
 
-    build)
-        build_project
-        ;;
-
     server)
-        ensure_built
+        ensure_binary
+        ensure_model
         log "Iniciando servidor de inferência em $HOST:$PORT ..."
-        cd /app
-        python run_inference_server.py \
+        exec /app/build/bin/llama-server \
             -m "$MODEL_FILE" \
             --host "$HOST" \
             --port "$PORT" \
@@ -71,19 +59,20 @@ case "$MODE" in
         ;;
 
     chat)
-        ensure_built
+        ensure_binary
+        ensure_model
         SYSTEM_PROMPT="${SYSTEM_PROMPT:-You are a helpful assistant.}"
         log "Iniciando modo chat interativo..."
-        cd /app
-        python run_inference.py \
+        exec /app/build/bin/llama-cli \
             -m "$MODEL_FILE" \
             -p "$SYSTEM_PROMPT" \
-            -cnv \
+            --conversation \
             -t "$THREADS"
         ;;
 
     benchmark)
-        ensure_built
+        ensure_binary
+        ensure_model
         log "Executando benchmark..."
         cd /app
         python utils/e2e_benchmark.py \
@@ -98,16 +87,15 @@ case "$MODE" in
         ;;
 
     *)
-        echo "Uso: docker run bitnet [download|build|server|chat|benchmark|bash]"
+        echo "Uso: docker run bitnet [download|server|chat|benchmark|bash]"
         echo ""
-        echo "Variáveis de ambiente disponíveis:"
-        echo "  MODEL_DIR    Diretório do modelo   (default: /app/models/BitNet-b1.58-2B-4T)"
-        echo "  MODEL_FILE   Caminho do .gguf       (default: MODEL_DIR/ggml-model-i2_s.gguf)"
-        echo "  QUANT_TYPE   Tipo de quantização    (default: i2_s)"
+        echo "Variáveis de ambiente:"
         echo "  HF_REPO      Repo Hugging Face      (default: microsoft/BitNet-b1.58-2B-4T-gguf)"
-        echo "  THREADS      Número de threads      (default: 4)"
-        echo "  HOST         Host do servidor       (default: 0.0.0.0)"
-        echo "  PORT         Porta do servidor      (default: 8080)"
+        echo "  MODEL_DIR    Diretório do modelo     (default: /app/models/BitNet-b1.58-2B-4T)"
+        echo "  MODEL_FILE   Caminho do .gguf        (default: MODEL_DIR/ggml-model-i2_s.gguf)"
+        echo "  THREADS      Número de threads       (default: 4)"
+        echo "  HOST         Host do servidor        (default: 0.0.0.0)"
+        echo "  PORT         Porta do servidor       (default: 8080)"
         exit 1
         ;;
 esac
