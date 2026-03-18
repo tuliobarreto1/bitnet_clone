@@ -1,0 +1,54 @@
+services:
+  bitnet:
+    image: ${COOLIFY_IMAGE:-bitnet-cpp:latest}
+    container_name: bitnet
+    command: server
+
+    labels:
+      # --- Traefik ---
+      - "traefik.enable=true"
+      - "traefik.http.routers.bitnet.rule=Host(`${BITNET_DOMAIN:-bitnet.seudominio.com}`)"
+      - "traefik.http.routers.bitnet.entrypoints=https"
+      - "traefik.http.routers.bitnet.tls=true"
+      - "traefik.http.routers.bitnet.tls.certresolver=letsencrypt"
+      - "traefik.http.services.bitnet.loadbalancer.server.port=8080"
+
+    volumes:
+      # Volume nomeado — persiste modelos entre deploys
+      - bitnet_models:/app/models
+
+    environment:
+      HF_REPO: ${HF_REPO:-microsoft/BitNet-b1.58-2B-4T-gguf}
+      MODEL_DIR: /app/models/BitNet-b1.58-2B-4T
+      MODEL_FILE: /app/models/BitNet-b1.58-2B-4T/ggml-model-i2_s.gguf
+      QUANT_TYPE: ${QUANT_TYPE:-i2_s}
+      THREADS: ${THREADS:-4}
+      HOST: 0.0.0.0
+      PORT: 8080
+      # Descomente se precisar de modelo privado no HF
+      # HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN}
+
+    networks:
+      - coolify  # rede padrão do Coolify/Traefik
+
+    restart: unless-stopped
+
+    deploy:
+      resources:
+        limits:
+          memory: ${MEMORY_LIMIT:-8G}
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 180s  # build + download demora, dá mais tempo
+
+volumes:
+  bitnet_models:
+    name: bitnet_models  # nome fixo, sobrevive a redeploys
+
+networks:
+  coolify:
+    external: true  # usa a rede que o Coolify já criou
