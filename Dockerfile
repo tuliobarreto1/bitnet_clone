@@ -27,7 +27,6 @@ RUN wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
 
 WORKDIR /app
 
-# --- Clona BitNet ---
 RUN git clone --recursive https://github.com/microsoft/BitNet.git .
 
 # --- Python venv ---
@@ -38,7 +37,13 @@ RUN pip install --upgrade pip \
     && pip install -r requirements.txt \
     && pip install huggingface_hub
 
-# Volume para modelos (não faz parte da imagem)
+# --- COMPILA AQUI NO BUILD, com apenas 1 thread pra não estourar RAM ---
+RUN mkdir -p build && \
+    cmake -B build -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_C_COMPILER=clang-18 \
+      -DCMAKE_CXX_COMPILER=clang++-18 && \
+    cmake --build build --config Release -j1
+
 RUN mkdir -p /app/models
 
 EXPOSE 8080
