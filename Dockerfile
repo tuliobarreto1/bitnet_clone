@@ -27,6 +27,11 @@ WORKDIR /app
 
 RUN git clone --recursive https://github.com/microsoft/BitNet.git .
 
+# Corrige bug de const no ggml-bitnet-mad.cpp incompatível com Clang 18
+RUN sed -i \
+    's/int8_t \* y_col = y + col \* by/const int8_t * y_col = y + col * by/g' \
+    /app/src/ggml-bitnet-mad.cpp
+
 RUN python3 -m venv /app/venv
 ENV PATH="/app/venv/bin:$PATH"
 
