@@ -1,6 +1,6 @@
 services:
   bitnet:
-    image: ${COOLIFY_IMAGE:-bitnet-cpp:latest}
+    build: .
     container_name: bitnet
     command: server
 
