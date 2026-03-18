@@ -1,21 +1,17 @@
 services:
+
+  # ─────────────────────────────────────────────
+  # BitNet — servidor de inferência (API OpenAI)
+  # ─────────────────────────────────────────────
   bitnet:
     build: .
     container_name: bitnet
     command: server
-
-    labels:
-      # --- Traefik ---
-      - "traefik.enable=true"
-      - "traefik.http.routers.bitnet.rule=Host(`${BITNET_DOMAIN:-bitnet.seudominio.com}`)"
-      - "traefik.http.routers.bitnet.entrypoints=https"
-      - "traefik.http.routers.bitnet.tls=true"
-      - "traefik.http.routers.bitnet.tls.certresolver=letsencrypt"
-      - "traefik.http.services.bitnet.loadbalancer.server.port=8080"
+    restart: unless-stopped
 
     volumes:
-      # Volume nomeado — persiste modelos entre deploys
       - bitnet_models:/app/models
+      - bitnet_build:/app/volume
 
     environment:
       HF_REPO: ${HF_REPO:-microsoft/BitNet-b1.58-2B-4T-gguf}
@@ -25,30 +21,77 @@ services:
       THREADS: ${THREADS:-4}
       HOST: 0.0.0.0
       PORT: 8080
-      # Descomente se precisar de modelo privado no HF
-      # HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN}
+      BUILD_DIR: /app/volume/build
+
+    # BitNet NÃO fica exposto externamente — só o Open WebUI é público
+    expose:
+      - "8080"
 
     networks:
-      - coolify  # rede padrão do Coolify/Traefik
-
-    restart: unless-stopped
-
-    deploy:
-      resources:
-        limits:
-          memory: ${MEMORY_LIMIT:-8G}
+      - coolify
+      - internal
 
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 180s  # build + download demora, dá mais tempo
+      retries: 5
+      start_period: 1200s  # 20 min para build + download na 1ª vez
 
+  # ─────────────────────────────────────────────
+  # Open WebUI — interface de chat
+  # ─────────────────────────────────────────────
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: unless-stopped
+
+    depends_on:
+      - bitnet
+
+    volumes:
+      - open_webui_data:/app/backend/data
+
+    environment:
+      # Aponta para o BitNet como backend OpenAI
+      OPENAI_API_BASE_URL: http://bitnet:8080/v1
+      OPENAI_API_KEY: "dummy"  # BitNet não exige auth, mas o campo é obrigatório
+
+      # Desativa o Ollama (não estamos usando)
+      ENABLE_OLLAMA_API: "false"
+
+      # Configurações gerais
+      WEBUI_NAME: "BitNet Chat"
+      WEBUI_AUTH: "false"  # sem login — troque para "true" se quiser proteger
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.bitnet-chat.rule=Host(`${BITNET_DOMAIN:-bitnet.seudominio.com}`)"
+      - "traefik.http.routers.bitnet-chat.entrypoints=https"
+      - "traefik.http.routers.bitnet-chat.tls=true"
+      - "traefik.http.routers.bitnet-chat.tls.certresolver=letsencrypt"
+      - "traefik.http.services.bitnet-chat.loadbalancer.server.port=8080"
+
+    networks:
+      - coolify
+      - internal
+
+# ─────────────────────────────────────────────
+# Volumes
+# ─────────────────────────────────────────────
 volumes:
   bitnet_models:
-    name: bitnet_models  # nome fixo, sobrevive a redeploys
+    name: bitnet_models
+  bitnet_build:
+    name: bitnet_build
+  open_webui_data:
+    name: open_webui_data
 
+# ─────────────────────────────────────────────
+# Redes
+# ─────────────────────────────────────────────
 networks:
   coolify:
-    external: true  # usa a rede que o Coolify já criou
+    external: true   # rede do Coolify/Traefik
+  internal:
+    internal: true   # rede privada entre os serviços
