@@ -6,7 +6,6 @@ ENV PYTHONUNBUFFERED=1
 ENV CC=clang-18
 ENV CXX=clang++-18
 
-# --- Dependências base ---
 RUN apt-get update && apt-get install -y \
     git cmake wget curl \
     lsb-release software-properties-common gnupg \
@@ -14,7 +13,6 @@ RUN apt-get update && apt-get install -y \
     python3 python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
-# --- Clang 18 ---
 RUN wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
       | tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc > /dev/null \
     && echo "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main" \
@@ -29,7 +27,6 @@ WORKDIR /app
 
 RUN git clone --recursive https://github.com/microsoft/BitNet.git .
 
-# --- Python venv ---
 RUN python3 -m venv /app/venv
 ENV PATH="/app/venv/bin:$PATH"
 
@@ -37,14 +34,7 @@ RUN pip install --upgrade pip \
     && pip install -r requirements.txt \
     && pip install huggingface_hub
 
-# --- COMPILA AQUI NO BUILD, com apenas 1 thread pra não estourar RAM ---
-RUN mkdir -p build && \
-    cmake -B build -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_C_COMPILER=clang-18 \
-      -DCMAKE_CXX_COMPILER=clang++-18 && \
-    cmake --build build --config Release -j1
-
-RUN mkdir -p /app/models
+RUN mkdir -p /app/models /app/volume
 
 EXPOSE 8080
 
